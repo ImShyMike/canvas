@@ -239,6 +239,7 @@
 	function handleMouseDown(event: MouseEvent) {
 		if (event.button === 0) {
 			// left
+			if ((event.target as HTMLElement) !== canvas) return; // don't start painting if not on canvas
 			isPainting = true;
 			const [x, y] = getCanvasCoordinates(event);
 			if (x >= 0 && x <= CANVAS_WIDTH && y >= 0 && y <= CANVAS_HEIGHT) {
@@ -444,10 +445,10 @@
 			saveState();
 		});
 
-        // close the websocket
-        if (ws) {
-            ws.close();
-        }
+		// close the websocket
+		if (ws) {
+			ws.close();
+		}
 	});
 
 	$effect(() => {
@@ -513,15 +514,24 @@
 	</div>
 
 	<!-- Canvas Container -->
-	<div bind:this={canvasContainer} class="relative flex-1 overflow-hidden bg-gray-200">
+	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+	<div
+		bind:this={canvasContainer}
+		onwheel={handleWheel}
+		onmousedown={handleMouseDown}
+		onmousemove={handleMouseMove}
+		onmouseup={handleMouseUp}
+		class="relative flex-1 overflow-hidden bg-gray-200"
+		role="application"
+		tabindex="0"
+		aria-label="Canvas background"
+	>
 		<canvas
 			bind:this={canvas}
 			class="absolute hidden cursor-crosshair border border-gray-300 bg-white"
 			style="transform-origin: 0 0; image-rendering: pixelated;"
-			onmousedown={handleMouseDown}
-			onmousemove={handleMouseMove}
-			onmouseup={handleMouseUp}
-			onwheel={handleWheel}
+			aria-label="Canvas"
 		></canvas>
 	</div>
 
