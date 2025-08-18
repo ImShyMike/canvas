@@ -1,4 +1,6 @@
-export const WEBSOCKET_URL = 'ws://127.0.0.1:2325';
+import { dev } from '$app/environment';
+
+export const WEBSOCKET_URL = dev ? 'ws://localhost:2325' : 'wss://canvas-api.shymike.dev';
 
 export const CANVAS_WIDTH = 1024;
 export const CANVAS_HEIGHT = 1024;
