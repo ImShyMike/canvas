@@ -277,6 +277,8 @@
 			offsetY = savedOffsetY || 0;
 			selectedColor = savedColor || `#${getRandomHexColor()}`;
 			selectedFlavor = savedFlavor || 'auto';
+		} else {
+			selectedColor = `#${getRandomHexColor()}`;
 		}
 
 		updateCanvasPosition(canvas, scale, offsetX, offsetY);
