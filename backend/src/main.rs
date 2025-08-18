@@ -13,7 +13,7 @@ use tungstenite::Bytes;
 type Tx = mpsc::UnboundedSender<Message>;
 type Clients = Arc<RwLock<HashMap<usize, Tx>>>;
 type SharedCanvas = Arc<RwLock<Canvas>>;
-type RequestTracker = Arc<RwLock<VecDeque<Instant>>>;
+type RequestTracker = Arc<RwLock<VecDeque<(Instant, u32)>>>;
 
 const CANVAS_WIDTH: usize = 1024;
 const CANVAS_HEIGHT: usize = 1024;
@@ -161,7 +161,7 @@ fn calculate_requests_per_second(request_tracker: &RequestTracker) -> f32 {
     
     // clean up old requests
     let mut tracker = request_tracker.write().unwrap();
-    while let Some(&front_time) = tracker.front() {
+    while let Some(&(front_time, _)) = tracker.front() {
         if front_time < interval_start {
             tracker.pop_front();
         } else {
@@ -170,16 +170,16 @@ fn calculate_requests_per_second(request_tracker: &RequestTracker) -> f32 {
     }
     
     // calculate requests per second
-    (tracker.len() as f32) / 10.0
+    let total_requests: u32 = tracker.iter().map(|(_, count)| count).sum();
+    (total_requests as f32) / 10.0
 }
-
 fn parse_message(canvas: &SharedCanvas, clients: &Clients, request_tracker: &RequestTracker, data: &Bytes) -> ResponseType {
     if data.is_empty() {
         return ResponseType::Error(ErrorCode::InvalidMessageType);
     }
 
     // track this request
-    request_tracker.write().unwrap().push_back(Instant::now());
+    request_tracker.write().unwrap().push_back((Instant::now(), 1));
 
     let mut cursor = Cursor::new(data);
     let msg_type = cursor.get_u8();
@@ -284,6 +284,7 @@ async fn main() {
                             // Broadcast message: [type:1][coords:3][rgb:3] = 7 bytes
                             let broadcast_msg = create_set_pixel_broadcast(x, y, color);
                             
+                            let mut broadcast_count = 0;
                             // send to all clients
                             for (client_id, other_tx) in clients_ref.read().unwrap().iter() {
                                 if other_tx.is_closed() {
@@ -295,6 +296,12 @@ async fn main() {
                                 }
                                 let _ = other_tx
                                     .send(Message::Binary(broadcast_msg.clone().into()));
+                                broadcast_count += 1;
+                            }
+                            
+                            // track the broadcast
+                            if broadcast_count > 0 {
+                                request_tracker_ref.write().unwrap().push_back((Instant::now(), broadcast_count));
                             }
                         }
                         ResponseType::GetAllPixels(pixels) => {

@@ -8,9 +8,22 @@
 
 	const CANVAS_WIDTH = 1024;
 	const CANVAS_HEIGHT = 1024;
-	const INITIAL_SCALE = 0.5;
+	const INITIAL_SCALE = 0.75;
 	const MIN_SCALE = 0.1;
 	const MAX_SCALE = 5.0;
+
+	const FLAVORS = [
+		{ id: "latte", name: "Latte", emoji: "🌻" },
+		{ id: "frappe", name: "Frappé", emoji: "🪴" },
+		{ id: "macchiato", name: "Macchiato", emoji: "🌺" },
+		{ id: "mocha", name: "Mocha", emoji: "🌿" },
+		{ id: "auto", name: "Auto", emoji: "🖥️" },
+	];
+
+	const prefersDark = typeof window !== 'undefined' 
+		? window.matchMedia("(prefers-color-scheme: dark)").matches 
+		: false;
+	const defaultTheme = prefersDark ? "mocha" : "latte";
 
 	// state stuff
 	let canvas: HTMLCanvasElement;
@@ -18,7 +31,10 @@
 	let ws: WebSocket;
 	let isConnected = $state(false);
 	let isPainting = $state(false);
-	let selectedColor = $state('#000000');
+	let selectedColor = $state('#000000');	
+	let selectedFlavor = $state('auto');
+	let dropdownShown = $state(false);
+	let mobileWarning = $state(false);
 
 	// stats state
 	let clientCount = $state(0);
@@ -206,7 +222,7 @@
 		const message = new Uint8Array(7);
 		message[0] = MessageType.SET_PIXEL;
 
-		const coords = packCoordinates(x - 1, y - 1);
+		const coords = packCoordinates(x, y);
 		message.set(coords, 1);
 
 		const rgb = packRGB(color);
@@ -241,9 +257,11 @@
 			// left
 			if ((event.target as HTMLElement) !== canvas) return; // don't start painting if not on canvas
 			isPainting = true;
-			const [x, y] = getCanvasCoordinates(event);
+			let [x, y] = getCanvasCoordinates(event);
 			if (x >= 0 && x <= CANVAS_WIDTH && y >= 0 && y <= CANVAS_HEIGHT) {
 				const color = hexToRGB(selectedColor);
+				x -= 1; y -= 1;
+				if (getPixelColor(x, y) === color) { return; } // don't send if color is the same
 				sendSetPixel(x, y, color);
 			}
 		} else if (event.buttons === 2 || event.buttons === 4) {
@@ -257,9 +275,11 @@
 	function handleMouseMove(event: MouseEvent) {
 		if (isPainting && event.buttons === 1) {
 			// left
-			const [x, y] = getCanvasCoordinates(event);
+			let [x, y] = getCanvasCoordinates(event);
 			if (x >= 0 && x <= CANVAS_WIDTH && y >= 0 && y <= CANVAS_HEIGHT) {
 				const color = hexToRGB(selectedColor);
+				x -= 1; y -= 1;
+				if (getPixelColor(x, y) === color) { return; } // don't send if color is the same
 				sendSetPixel(x, y, color);
 			}
 		} else if (isDragging && (event.buttons === 2 || event.buttons === 4)) {
@@ -318,32 +338,70 @@
 
 	// === localstorage helpers ===
 	function saveState() {
-		if (!canvas) return;
+		if (!canvas || typeof window === 'undefined') return;
 
 		const state = {
 			scale,
 			offsetX,
 			offsetY,
-			selectedColor
+			selectedColor,
+			selectedFlavor
 		};
 		localStorage.setItem('settings', JSON.stringify(state));
 	}
 
 	function loadState() {
+		if (typeof window === 'undefined') return;
+		
 		const state = localStorage.getItem('settings');
 		if (state) {
 			const {
 				scale: savedScale,
 				offsetX: savedOffsetX,
 				offsetY: savedOffsetY,
-				selectedColor: savedColor
+				selectedColor: savedColor,
+				selectedFlavor: savedFlavor
+
 			} = JSON.parse(state);
 			scale = savedScale || INITIAL_SCALE;
 			offsetX = savedOffsetX || 0;
 			offsetY = savedOffsetY || 0;
 			selectedColor = savedColor || `#${getRandomHexColor()}`;
+			selectedFlavor = savedFlavor || defaultTheme;
 		}
 		updateCanvasPosition();
+	}
+
+	// === theme helpers ===
+	function setTheme(flavor: string) {
+		if (!flavor) return;
+		
+		if (flavor === 'auto') {
+			// for auto theme, listen to system preference changes
+			const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+			const updateAutoTheme = () => {
+				const autoTheme = mediaQuery.matches ? "mocha" : "latte";
+				document.documentElement.className = autoTheme;
+				console.log(`Auto theme set to: ${autoTheme}`);
+			};
+			
+			// set initial auto theme
+			updateAutoTheme();
+			
+			// listen for changes
+			mediaQuery.removeEventListener('change', updateAutoTheme);
+			mediaQuery.addEventListener('change', updateAutoTheme);
+			
+			selectedFlavor = 'auto';
+		} else {
+			// remove any existing media query listeners
+			const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+			mediaQuery.removeEventListener('change', () => {});
+			
+			selectedFlavor = flavor;
+			document.documentElement.className = selectedFlavor;
+			console.log(`Setting theme to: ${selectedFlavor}`);
+		}
 	}
 
 	// === canvas helpers ===
@@ -352,6 +410,13 @@
 			pixels[y * CANVAS_WIDTH + x] = color;
 			renderPixel(x, y, color);
 		}
+	}
+
+	function getPixelColor(x: number, y: number): number {
+		if (x < 0 || x >= CANVAS_WIDTH || y < 0 || y >= CANVAS_HEIGHT) {
+			return 0; // out of bounds
+		}
+		return pixels[y * CANVAS_WIDTH + x];
 	}
 
 	function renderPixel(x: number, y: number, color: number) {
@@ -436,19 +501,37 @@
 
 		// prevent context menu opening on right click
 		canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+		
+		if (typeof window !== 'undefined') {
+			// save state on unload (page close)
+			window.addEventListener('beforeunload', () => {
+				saveState();
+
+				// close the websocket
+				if (ws) {
+					ws.close();
+					isConnected = false;
+				}
+			});
+
+			// mobile warning
+			window.addEventListener('resize', () => {
+				if (window.innerWidth <= 768) {
+					mobileWarning = true;
+				} else {
+					mobileWarning = false;
+				}
+			});
+			if (window.innerWidth <= 768) {
+				mobileWarning = true;
+			}
+		}
 
 		// load saved state
 		loadState();
 
-		// save state on unload
-		window.addEventListener('beforeunload', () => {
-			saveState();
-		});
-
-		// close the websocket
-		if (ws) {
-			ws.close();
-		}
+		// set the initial theme
+		setTheme(selectedFlavor);
 	});
 
 	$effect(() => {
@@ -461,55 +544,83 @@
 	});
 </script>
 
-<div class="flex h-screen flex-col bg-gray-100">
-	<!-- Header -->
-	<div class="flex justify-between gap-4 bg-white p-4 shadow-sm">
-		<div class="flex items-center gap-4">
-			<h1 class="text-xl font-bold">Canvas</h1>
-			<div class="h-3 w-3 rounded-full {isConnected ? 'bg-green-500' : 'bg-red-500'}"></div>
-			<span class="text-sm {isConnected ? 'text-green-600' : 'text-red-600'}">
+<div class="flex h-screen flex-col bg-base overflow-hidden">
+	<!-- Top Bar -->
+	<div class="flex justify-between gap-4 bg-mantle p-4 shadow-sm">
+		<div class="flex items-center gap-3">
+			<h1 class="text-xl font-bold text-text">Canvas</h1>
+			<div class="h-3 w-3 rounded-full {isConnected ? 'bg-green' : 'bg-red'}"></div>
+			<span class="text-sm {isConnected ? 'text-green' : 'text-red'}">
 				{isConnected ? 'Connected' : 'Disconnected'}
 			</span>
 
-			<!-- Stats Display -->
-			{#if isConnected}
-				<div class="flex items-center gap-4 border-l pl-4 text-sm text-gray-600">
-					<span class="flex items-center gap-1">
-						<People class="h-4 w-4" />
-						<strong>Clients:</strong>
-						{clientCount}
-					</span>
-					<span class="flex items-center gap-1">
-						<Clock class="h-4 w-4" />
-						<strong>RPS:</strong>
-						{requestsPerSecond.toFixed(2)}
-					</span>
-				</div>
-			{/if}
+			<div class="flex items-center gap-4">
+				{#if isConnected}
+					<div class="flex items-center gap-4 border-l border-overlay0 pl-4 text-sm text-subtext1">
+						<span class="flex items-center gap-1">
+							<People class="h-4 w-4" />
+							<strong>Clients:</strong>
+							{clientCount}
+						</span>
+						<span class="flex items-center gap-1">
+							<Clock class="h-4 w-4" />
+							<strong>RPS:</strong>
+							{requestsPerSecond.toFixed(2)}
+						</span>
+					</div>
+				{/if}
+			</div>
 		</div>
 
 		<div class="flex items-center gap-2">
-			<label for="color-picker" class="text-sm">Color:</label>
+			<label for="color-picker" class="text-sm text-text">Color:</label>
 			<input
 				id="color-picker"
 				type="color"
 				bind:value={selectedColor}
-				class="h-8 w-8 cursor-pointer rounded"
+				class="h-8 w-8 cursor-pointer rounded border border-overlay0"
 			/>
 
-			<span class="text-sm">Zoom: {Math.round(scale * 100)}%</span>
+			<span class="text-sm text-text">Zoom: {Math.round(scale * 100)}%</span>
 			<button
 				onclick={resetView}
-				class="rounded bg-blue-500 px-3 py-1 text-sm text-white hover:bg-blue-600"
+				class="rounded bg-blue px-3 py-1 text-sm text-base hover:bg-sapphire border border-base"
 			>
 				Reset View
 			</button>
 			<button
 				onclick={centerView}
-				class="rounded bg-green-500 px-3 py-1 text-sm text-white hover:bg-green-600"
+				class="rounded bg-green px-3 py-1 text-sm text-base hover:bg-teal border border-base"
 			>
 				Center
 			</button>
+			<div class="relative">
+				<button
+					class="flex items-center gap-2 rounded bg-surface0 px-3 py-1 text-sm text-text hover:bg-surface1 border border-overlay0"
+					onclick={() => (dropdownShown = !dropdownShown)}
+					title="Select Flavor"
+				>
+					<span class="text-sm">{FLAVORS.find(f => f.id === selectedFlavor)?.emoji}</span>
+					<span>{FLAVORS.find(f => f.id === selectedFlavor)?.name}</span>
+				</button>
+				{#if dropdownShown}
+					<div class="absolute right-0 mt-2 w-40 rounded bg-mantle shadow-lg z-10 border border-overlay0">
+						{#each FLAVORS as flavor}
+							<button
+								onclick={() => {
+									setTheme(flavor.id);
+									dropdownShown = false;
+								}}
+								class="flex w-full items-center gap-2 px-3 py-2 text-sm text-text hover:bg-surface0 {selectedFlavor === flavor.id ? 'bg-surface1' : ''}"
+								title={flavor.name}
+							>
+								<span class="text-sm">{flavor.emoji}</span>
+								<span>{flavor.name}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
 		</div>
 	</div>
 
@@ -522,28 +633,49 @@
 		onmousedown={handleMouseDown}
 		onmousemove={handleMouseMove}
 		onmouseup={handleMouseUp}
-		class="relative flex-1 overflow-hidden bg-gray-200"
+		class="relative flex-1 overflow-hidden bg-surface0"
 		role="application"
 		tabindex="0"
 		aria-label="Canvas background"
 	>
 		<canvas
 			bind:this={canvas}
-			class="absolute hidden cursor-crosshair border border-gray-300 bg-white"
+			class="absolute hidden cursor-crosshair border border-overlay0 bg-base"
 			style="transform-origin: 0 0; image-rendering: pixelated;"
 			aria-label="Canvas"
 		></canvas>
 	</div>
 
 	<!-- Instructions -->
-	<div class="border-t bg-white p-4 text-sm text-gray-600">
+	<div class="border-t border-overlay0 bg-mantle p-4 text-sm text-subtext1">
 		<div class="flex items-center justify-center gap-6">
-			<span><strong>Left Click + Drag:</strong> Paint pixels</span>
-			<span><strong>Right Click + Drag:</strong> Pan canvas</span>
-			<span><strong>Mouse Wheel:</strong> Zoom in/out</span>
+			<span><strong class="text-text">Left Click + Drag:</strong> Paint pixels</span>
+			<span><strong class="text-text">Right Click + Drag:</strong> Pan canvas</span>
+			<span><strong class="text-text">Mouse Wheel:</strong> Zoom in/out</span>
 		</div>
 	</div>
 </div>
+
+<!-- Mobile Warning -->
+{#if mobileWarning}
+	<div 
+		id="warning" 
+		class="fixed inset-0 bg-yellow text-mantle z-50 flex items-center justify-center"
+		style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; margin: 0; padding: 0; overflow: hidden;"
+	>
+		<div class="text-center px-6 py-8 max-w-sm mx-auto">
+			<strong class="mb-4 text-lg block">Warning</strong>
+			<span class="mb-2 text-sm block">This website was made for desktop, the website may look bad on mobile.</span>
+			<span class="mb-6 text-sm block">(will be fixed later)</span>
+			<button 
+				onclick={() => { mobileWarning = false; }} 
+				class="bg-red text-mantle px-4 py-2 rounded hover:bg-opacity-80 transition-colors"
+			>
+				Close
+			</button>
+		</div>
+	</div>
+{/if}
 
 <style>
 	canvas {
