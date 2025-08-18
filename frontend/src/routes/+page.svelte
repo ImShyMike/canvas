@@ -29,12 +29,6 @@
 	import Clock from 'virtual:icons/ic/round-access-time-filled';
 	import People from 'virtual:icons/ic/baseline-people';
 
-	const prefersDark =
-		typeof window !== 'undefined'
-			? window.matchMedia('(prefers-color-scheme: dark)').matches
-			: false;
-	const defaultTheme = prefersDark ? 'mocha' : 'latte';
-
 	// state stuff
 	let canvas: HTMLCanvasElement;
 	let ctx: CanvasRenderingContext2D;
@@ -282,14 +276,18 @@
 			offsetX = savedOffsetX || 0;
 			offsetY = savedOffsetY || 0;
 			selectedColor = savedColor || `#${getRandomHexColor()}`;
-			selectedFlavor = savedFlavor || defaultTheme;
+			selectedFlavor = savedFlavor || 'auto';
 		}
+
 		updateCanvasPosition(canvas, scale, offsetX, offsetY);
 	}
 
 	// === theme helpers ===
 	function setTheme(flavor: string) {
 		if (!flavor) return;
+
+		// save the selected theme
+		localStorage.setItem('theme', flavor);
 
 		if (flavor === 'auto') {
 			// for auto theme, listen to system preference changes

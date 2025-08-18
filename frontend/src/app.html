@@ -1,8 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="auto">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<script>
+			(function () {
+				const savedTheme = localStorage.getItem('theme');
+				const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+				const defaultTheme = prefersDark ? 'mocha' : 'latte';
+				const theme = savedTheme === 'auto' || !savedTheme ? defaultTheme : savedTheme;
+				document.documentElement.className = theme;
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
