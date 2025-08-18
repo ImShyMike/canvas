@@ -11,5 +11,7 @@ target/
 
 
 # Added by cargo
-
 /target
+
+# Canvas saves
+canvas.bin
