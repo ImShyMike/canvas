@@ -56,6 +56,7 @@
 	let lastMouseX = 0;
 	let lastMouseY = 0;
 	let canvasContainer: HTMLDivElement;
+	let animationFrameId: number | null = null;
 
 	// pixel data
 	let pixels: Uint32Array = new Uint32Array(CANVAS_WIDTH * CANVAS_HEIGHT);
@@ -119,10 +120,10 @@
 				break;
 
 			case ResponseType.STATS:
-				// Parse stats message: [type:1][client_count:4][rps:4] = 9 bytes
-				if (data.length >= 9) {
-					const clientCountBytes = data.slice(1, 5);
-					const rpsBytes = data.slice(5, 9);
+				// Parse stats message: [type:1][client_count:2][rps:4] = 7 bytes
+				if (data.length >= 7) {
+					const clientCountBytes = data.slice(1, 3);
+					const rpsBytes = data.slice(3, 7);
 
 					// convert bytes to numbers
 					const clientCountView = new DataView(
@@ -132,7 +133,7 @@
 					const rpsView = new DataView(rpsBytes.buffer, rpsBytes.byteOffset);
 
 					// using big-endian
-					stats.clientCount = clientCountView.getUint32(0, false);
+					stats.clientCount = clientCountView.getUint16(0, false);
 					stats.requestsPerSecond = rpsView.getFloat32(0, false);
 
 					console.log(
@@ -144,6 +145,15 @@
 	}
 
 	// === mouse handlers ===
+	function updateCanvasPositionSmooth() {
+		if (animationFrameId !== null) return;
+		
+		animationFrameId = requestAnimationFrame(() => {
+			updateCanvasPosition(canvas, scale, offsetX, offsetY);
+			animationFrameId = null;
+		});
+	}
+
 	function getCanvasCoordinates(event: MouseEvent): [number, number] {
 		const rect = canvas.getBoundingClientRect();
 		const clientX = event.clientX - rect.left;
@@ -203,7 +213,7 @@
 			lastMouseX = event.clientX;
 			lastMouseY = event.clientY;
 
-			updateCanvasPosition(canvas, scale, offsetX, offsetY);
+			updateCanvasPositionSmooth();
 		}
 	}
 
@@ -211,9 +221,15 @@
 		if (event.button === 0) {
 			// left
 			isPainting = false;
-		} else if (event.buttons === 2 || event.buttons === 4) {
+		} else if (event.button === 2 || event.button === 1) {
 			// right/middle
 			isDragging = false;
+			// when animation stops, instantly update canvas position
+			if (animationFrameId !== null) {
+				cancelAnimationFrame(animationFrameId);
+				animationFrameId = null;
+			}
+			updateCanvasPosition(canvas, scale, offsetX, offsetY);
 		}
 	}
 
@@ -242,7 +258,7 @@
 			offsetX += mouseX - newMouseX;
 			offsetY += mouseY - newMouseY;
 
-			updateCanvasPosition(canvas, scale, offsetX, offsetY);
+			updateCanvasPositionSmooth();
 		}
 	}
 
@@ -332,11 +348,10 @@
 		ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
 		// center the canvas
-		({ offsetX, offsetY, scale } = centerView(canvas, canvasContainer, scale) || {
-			offsetX,
-			offsetY,
-			scale
-		});
+		const centerResult = centerView(canvas, canvasContainer, scale);
+		if (centerResult) {
+			({ offsetX, offsetY, scale } = centerResult);
+		}
 
 		// connect to the websocket
 		connectWebSocket(socket, WEBSOCKET_URL, handleMessage);
@@ -348,6 +363,11 @@
 			// save state on unload (page close)
 			window.addEventListener('beforeunload', () => {
 				saveState();
+
+				// cleanup animation frame
+				if (animationFrameId !== null) {
+					cancelAnimationFrame(animationFrameId);
+				}
 
 				// close the websocket
 				if (socket.ws) {
@@ -388,11 +408,11 @@
 
 <div class="flex h-screen flex-col overflow-hidden bg-base">
 	<!-- Top Bar -->
-	<div class="flex justify-between gap-4 bg-mantle p-4 shadow-sm">
-		<div class="flex items-center gap-3">
-			<h1 class="text-xl font-bold text-text">Canvas</h1>
+	<div class="flex justify-between gap-4 bg-mantle p-3 shadow-sm border-b border-overlay0">
+		<div class="flex items-center gap-2">
+			<h1 class="text-xl font-bold text-text pr-2">Canvas</h1>
 			<div class="h-3 w-3 rounded-full {socket.isConnected ? 'bg-green' : 'bg-red'}"></div>
-			<span class="text-sm {socket.isConnected ? 'text-green' : 'text-red'}">
+			<span class="text-sm pr-2 {socket.isConnected ? 'text-green' : 'text-red'}">
 				{socket.isConnected ? 'Connected' : 'Disconnected'}
 			</span>
 
@@ -425,18 +445,24 @@
 
 			<span class="text-sm text-text">Zoom: {Math.round(scale * 100)}%</span>
 			<button
-				onclick={() => resetView(canvas, canvasContainer)}
+				onclick={() => {
+					const resetResult = resetView(canvas, canvasContainer);
+					if (resetResult) {
+						({ offsetX, offsetY, scale } = resetResult);
+					}
+				}}
 				class="rounded border border-base bg-blue px-3 py-1 text-sm text-base hover:bg-sapphire"
 			>
 				Reset View
 			</button>
 			<button
-				onclick={() =>
-					({ offsetX, offsetY, scale } = centerView(canvas, canvasContainer, scale) || {
-						offsetX,
-						offsetY,
-						scale
-					})}
+				onclick={() => {
+					const centerResult = centerView(canvas, canvasContainer, scale);
+					if (centerResult) {
+						({ offsetX, offsetY, scale } = centerResult);
+						updateCanvasPosition(canvas, scale, offsetX, offsetY);
+					}
+				}}
 				class="rounded border border-base bg-green px-3 py-1 text-sm text-base hover:bg-teal"
 			>
 				Center
@@ -493,13 +519,13 @@
 		<canvas
 			bind:this={canvas}
 			class="absolute hidden cursor-crosshair border border-overlay0 bg-base"
-			style="transform-origin: 0 0;"
+			style="transform-origin: 0 0; will-change: transform;"
 			aria-label="Canvas"
 		></canvas>
 	</div>
 
 	<!-- Instructions -->
-	<div class="border-t border-overlay0 bg-mantle p-4 text-sm text-subtext1">
+	<div class="border-t border-overlay0 bg-mantle p-2 text-sm text-subtext1">
 		<div class="flex items-center justify-center gap-6">
 			<span><strong class="text-text">Left Click + Drag:</strong> Paint pixels</span>
 			<span><strong class="text-text">Right Click + Drag:</strong> Pan canvas</span>

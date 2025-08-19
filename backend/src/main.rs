@@ -90,7 +90,7 @@ enum ResponseType {
     GetAllPixels(Vec<u32>),
     PixelColor(u32),
     Stats {
-        client_count: u32,
+        client_count: u16,
         requests_per_second: f32,
     },
     Error(ErrorCode),
@@ -183,8 +183,8 @@ fn create_error_response(error: ErrorCode) -> Vec<u8> {
     vec![ResponseType::ERROR, error as u8]
 }
 
-fn create_stats_response(client_count: u32, requests_per_second: f32) -> Vec<u8> {
-    // Response format: [type:1][client_count:4][rps:4] = 9 bytes total
+fn create_stats_response(client_count: u16, requests_per_second: f32) -> Vec<u8> {
+    // Response format: [type:1][client_count:2][rps:4] = 7 bytes total
     let mut message = Vec::with_capacity(9);
     message.push(ResponseType::STATS);
     message.extend_from_slice(&client_count.to_be_bytes());
@@ -274,7 +274,7 @@ fn parse_message(
             ResponseType::GetAllPixels(canvas.read().unwrap().pixels.clone())
         }
         Ok(MessageType::GetStats) => {
-            let client_count = clients.read().unwrap().len() as u32;
+            let client_count = clients.read().unwrap().len() as u16;
             let requests_per_second = calculate_requests_per_second(request_tracker);
             ResponseType::Stats {
                 client_count,
@@ -313,7 +313,7 @@ async fn main() {
         loop {
             interval.tick().await;
 
-            let client_count = clients_for_stats.read().unwrap().len() as u32;
+            let client_count = clients_for_stats.read().unwrap().len() as u16;
             let requests_per_second = calculate_requests_per_second(&request_tracker_for_stats);
             let stats_msg = create_stats_response(client_count, requests_per_second);
 

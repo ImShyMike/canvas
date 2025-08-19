@@ -61,9 +61,17 @@ export function updateCanvasPosition(
 	canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
 }
 
-export function resetView(canvas: HTMLCanvasElement | null, canvasContainer: HTMLDivElement) {
-	updateCanvasPosition(canvas, INITIAL_SCALE, 0, 0);
-	centerView(canvas, canvasContainer, INITIAL_SCALE);
+export function resetView(canvas: HTMLCanvasElement | null, canvasContainer: HTMLDivElement): { offsetX: number; offsetY: number; scale: number } | void {
+	const centerResult = centerView(canvas, canvasContainer, INITIAL_SCALE);
+	if (centerResult) {
+		updateCanvasPosition(canvas, INITIAL_SCALE, centerResult.offsetX, centerResult.offsetY);
+		return {
+			offsetX: centerResult.offsetX,
+			offsetY: centerResult.offsetY,
+			scale: INITIAL_SCALE
+		};
+	}
+	return undefined;
 }
 
 export function centerView(
@@ -79,7 +87,6 @@ export function centerView(
 
 	const offsetX = (containerRect.width - canvasWidth) / 2;
 	const offsetY = (containerRect.height - canvasHeight) / 2;
-	updateCanvasPosition(canvas, scale, offsetX, offsetY);
 
 	return {
 		offsetX,

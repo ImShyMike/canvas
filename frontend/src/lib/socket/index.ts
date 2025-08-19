@@ -16,6 +16,7 @@ export function connectWebSocket(
 			console.log('Connected to WebSocket');
 			socket.isConnected = true;
 			requestAllPixels(socket);
+			getStats(socket);
 		};
 
 		socket.ws.onclose = () => {
@@ -63,5 +64,15 @@ export function requestAllPixels(socket: Socket) {
 
 	const message = new Uint8Array(1);
 	message[0] = MessageType.GET_ALL_PIXELS;
+	socket.ws.send(message);
+}
+
+export function getStats(socket: Socket) {
+    if (!socket.isConnected || !socket.ws) {
+        return null;
+    }
+
+    const message = new Uint8Array(1);
+	message[0] = MessageType.GET_STATS;
 	socket.ws.send(message);
 }
