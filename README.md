@@ -5,6 +5,7 @@ A big and fast real time canvas made using Rust and SvelteKit!
 ## Protocol
 
 The server utilizes a custom data transfer protocol with many custom requests and responses:
+
 ### Request Types
 
 | Name         | Format (with byte size) | Example |
