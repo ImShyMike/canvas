@@ -2,6 +2,8 @@
 
 A big and fast real time canvas made using Rust and SvelteKit!
 
+![Demo image](assets/demo.png)
+
 ## Protocol
 
 The server utilizes a custom data transfer protocol with many custom requests and responses:
