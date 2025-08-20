@@ -12,6 +12,10 @@ dependencies = [
     "websockets>=15.0.1",
 ]
 
+[project.urls]
+Homepage = "https://canvas.shymike.dev"
+Repository = "https://github.com/ImShyMike/canvas"
+
 [build-system]
 requires = ["uv_build>=0.8.11,<0.9.0"]
 build-backend = "uv_build"
