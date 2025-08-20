@@ -4,6 +4,16 @@ A big and fast real time canvas made using Rust and SvelteKit!
 
 ![Demo image](assets/demo.png)
 
+---
+
+## SDKs
+
+### Python
+
+A Python SDK for the custom protocol is available on PyPI with the name "[canvas-protocol](https://pypi.org/project/canvas-protocol)".
+
+It's source code is located [in this repository](./sdk/python/README.md).
+
 ## Protocol
 
 The server utilizes a custom data transfer protocol with many custom requests and responses:

@@ -15,3 +15,6 @@ target/
 
 # Canvas saves
 canvas.bin
+
+# Environment files
+.env
