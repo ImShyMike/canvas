@@ -114,7 +114,9 @@ fn save_canvas(canvas: &SharedCanvas) {
         .iter()
         .flat_map(|&pixel| pack_rgb(pixel))
         .collect();
-    std::fs::write(CANVAS_SAVE_FILE, packed_data).expect("Unable to save canvas");
+    if let Err(e) = std::fs::write(CANVAS_SAVE_FILE, packed_data) {
+        eprintln!("Unable to save canvas: {e}");
+    }
 }
 
 fn load_canvas(canvas: &SharedCanvas) {
@@ -125,11 +127,15 @@ fn load_canvas(canvas: &SharedCanvas) {
                 pixels[i] = unpack_rgb(chunk);
             }
         }
-        canvas.write().unwrap().pixels = pixels;
+        if let Ok(mut c) = canvas.write() {
+            c.pixels = pixels;
+        } else {
+            eprintln!("Failed to acquire write lock for canvas during load");
+        }
         println!("Canvas loaded from file.");
     } else {
         println!("Canvas file not found, initializing with default color.");
-        save_canvas(canvas);
+    save_canvas(canvas);
     }
 }
 
@@ -197,7 +203,13 @@ fn calculate_requests_per_second(request_tracker: &RequestTracker) -> f32 {
     let interval_start = now - STATS_WINDOW_INTERVAL;
 
     // clean up old requests
-    let mut tracker = request_tracker.write().unwrap();
+    let mut tracker = match request_tracker.write() {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Failed to acquire write lock for request_tracker: {e}");
+            return 0.0;
+        }
+    };
     while let Some(&(front_time, _)) = tracker.front() {
         if front_time < interval_start {
             tracker.pop_front();
@@ -221,10 +233,11 @@ fn parse_message(
     }
 
     // track this request
-    request_tracker
-        .write()
-        .unwrap()
-        .push_back((Instant::now(), 1));
+    if let Ok(mut tracker) = request_tracker.write() {
+        tracker.push_back((Instant::now(), 1));
+    } else {
+        eprintln!("Failed to acquire write lock for request_tracker in parse_message");
+    }
 
     let mut cursor = Cursor::new(data);
     let msg_type = cursor.get_u8();
@@ -242,10 +255,11 @@ fn parse_message(
             let rgb_bytes = [cursor.get_u8(), cursor.get_u8(), cursor.get_u8()];
             let color = unpack_rgb(&rgb_bytes);
 
-            canvas
-                .write()
-                .unwrap()
-                .set_pixel(x as usize, y as usize, color);
+            if let Ok(mut c) = canvas.write() {
+                c.set_pixel(x as usize, y as usize, color);
+            } else {
+                eprintln!("Failed to acquire write lock for canvas in SetPixel");
+            }
 
             ResponseType::Broadcast {
                 x,
@@ -263,7 +277,13 @@ fn parse_message(
             let coord_bytes = [cursor.get_u8(), cursor.get_u8(), cursor.get_u8()];
             let (x, y, _) = unpack_coordinates(&coord_bytes);
 
-            let pixel_color = canvas.read().unwrap().get_pixel(x as usize, y as usize);
+            let pixel_color = match canvas.read() {
+                Ok(c) => c.get_pixel(x as usize, y as usize),
+                Err(e) => {
+                    eprintln!("Failed to acquire read lock for canvas in GetPixel: {e}");
+                    return ResponseType::Error(ErrorCode::InvalidMessageType);
+                }
+            };
 
             match pixel_color {
                 Some(color) => ResponseType::PixelColor(color),
@@ -271,10 +291,22 @@ fn parse_message(
             }
         }
         Ok(MessageType::GetAllPixels) => {
-            ResponseType::GetAllPixels(canvas.read().unwrap().pixels.clone())
+            match canvas.read() {
+                Ok(c) => ResponseType::GetAllPixels(c.pixels.clone()),
+                Err(e) => {
+                    eprintln!("Failed to acquire read lock for canvas in GetAllPixels: {e}");
+                    ResponseType::Error(ErrorCode::InvalidMessageType)
+                }
+            }
         }
         Ok(MessageType::GetStats) => {
-            let client_count = clients.read().unwrap().len() as u16;
+            let client_count = match clients.read() {
+                Ok(c) => c.len() as u16,
+                Err(e) => {
+                    eprintln!("Failed to acquire read lock for clients in GetStats: {e}");
+                    0
+                }
+            };
             let requests_per_second = calculate_requests_per_second(request_tracker);
             ResponseType::Stats {
                 client_count,
@@ -288,7 +320,13 @@ fn parse_message(
 #[tokio::main]
 async fn main() {
     let canvas: SharedCanvas = Arc::new(RwLock::new(Canvas::new(CANVAS_WIDTH, CANVAS_HEIGHT)));
-    let listener = TcpListener::bind(ADDRESS).await.unwrap();
+    let listener = match TcpListener::bind(ADDRESS).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Failed to bind to {ADDRESS}: {e}");
+            return;
+        }
+    };
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
     let request_tracker: RequestTracker = Arc::new(RwLock::new(VecDeque::new()));
     let mut id_counter = 0;
@@ -329,7 +367,9 @@ async fn main() {
     // shutdown handler
     let canvas_for_shutdown = canvas.clone();
     tokio::spawn(async move {
-        signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
+        if let Err(e) = signal::ctrl_c().await {
+            eprintln!("Failed to listen for ctrl+c: {e}");
+        }
         save_canvas(&canvas_for_shutdown);
         println!("\nCanvas saved! Exiting...");
         std::process::exit(0);
@@ -339,14 +379,25 @@ async fn main() {
 
     // main loop
     while let Ok((stream, _)) = listener.accept().await {
-        let ws_stream = accept_async(stream).await.unwrap();
+        let ws_stream = match accept_async(stream).await {
+            Ok(ws) => ws,
+            Err(e) => {
+                eprintln!("WebSocket handshake failed: {e}");
+                continue;
+            }
+        };
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
 
         let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
         let id = id_counter;
         id_counter += 1;
 
-        clients.write().unwrap().insert(id, tx.clone());
+        if let Ok(mut c) = clients.write() {
+            c.insert(id, tx.clone());
+        } else {
+            eprintln!("Failed to acquire write lock for clients in main loop");
+            continue;
+        }
 
         let clients_ref = clients.clone();
         let canvas_ref = canvas.clone();
@@ -357,7 +408,6 @@ async fn main() {
                 if let Message::Binary(data) = msg {
                     let action =
                         parse_message(&canvas_ref, &clients_ref, &request_tracker_ref, &data);
-
                     match action {
                         ResponseType::Broadcast {
                             x,
@@ -370,27 +420,38 @@ async fn main() {
 
                             let mut broadcast_count = 0;
                             // send to all clients
-                            for (client_id, other_tx) in clients_ref.read().unwrap().iter() {
-                                if other_tx.is_closed() {
-                                    // close the connection if the channel is closed
-                                    clients_ref.write().unwrap().remove(client_id);
-                                    continue; // skip it
+                            if let Ok(client_map) = clients_ref.read() {
+                                let client_ids: Vec<_> = client_map.keys().cloned().collect();
+                                for client_id in client_ids {
+                                    if let Ok(client_map) = clients_ref.read() {
+                                        if let Some(other_tx) = client_map.get(&client_id) {
+                                            if other_tx.is_closed() {
+                                                if let Ok(mut map) = clients_ref.write() {
+                                                    map.remove(&client_id);
+                                                } else {
+                                                    eprintln!("Failed to acquire write lock for clients_ref in broadcast remove");
+                                                }
+                                                continue;
+                                            }
+                                            if skip_sender && client_id == id {
+                                                continue;
+                                            }
+                                            let _ = other_tx.send(Message::Binary(broadcast_msg.clone().into()));
+                                            broadcast_count += 1;
+                                        }
+                                    }
                                 }
-                                if skip_sender && *client_id == id {
-                                    // if flag is true, skip sending to the sender
-                                    continue;
-                                }
-                                let _ =
-                                    other_tx.send(Message::Binary(broadcast_msg.clone().into()));
-                                broadcast_count += 1;
+                            } else {
+                                eprintln!("Failed to acquire read lock for clients_ref in broadcast");
                             }
 
                             // track the broadcast
                             if broadcast_count > 0 {
-                                request_tracker_ref
-                                    .write()
-                                    .unwrap()
-                                    .push_back((Instant::now(), broadcast_count));
+                                if let Ok(mut tracker) = request_tracker_ref.write() {
+                                    tracker.push_back((Instant::now(), broadcast_count));
+                                } else {
+                                    eprintln!("Failed to acquire write lock for request_tracker_ref in broadcast");
+                                }
                             }
                         }
                         ResponseType::GetAllPixels(pixels) => {
@@ -423,7 +484,11 @@ async fn main() {
                     }
                 }
             }
-            clients_ref.write().unwrap().remove(&id);
+            if let Ok(mut c) = clients_ref.write() {
+                c.remove(&id);
+            } else {
+                eprintln!("Failed to acquire write lock for clients_ref in connection cleanup");
+            }
         });
 
         // router
