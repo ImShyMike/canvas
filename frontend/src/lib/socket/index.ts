@@ -68,11 +68,11 @@ export function requestAllPixels(socket: Socket) {
 }
 
 export function getStats(socket: Socket) {
-    if (!socket.isConnected || !socket.ws) {
-        return null;
-    }
+	if (!socket.isConnected || !socket.ws) {
+		return null;
+	}
 
-    const message = new Uint8Array(1);
+	const message = new Uint8Array(1);
 	message[0] = MessageType.GET_STATS;
 	socket.ws.send(message);
 }

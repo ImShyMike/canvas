@@ -61,7 +61,10 @@ export function updateCanvasPosition(
 	canvas.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
 }
 
-export function resetView(canvas: HTMLCanvasElement | null, canvasContainer: HTMLDivElement): { offsetX: number; offsetY: number; scale: number } | void {
+export function resetView(
+	canvas: HTMLCanvasElement | null,
+	canvasContainer: HTMLDivElement
+): { offsetX: number; offsetY: number; scale: number } | void {
 	const centerResult = centerView(canvas, canvasContainer, INITIAL_SCALE);
 	if (centerResult) {
 		updateCanvasPosition(canvas, INITIAL_SCALE, centerResult.offsetX, centerResult.offsetY);

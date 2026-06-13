@@ -179,6 +179,7 @@
 				if (getPixelColor(pixels, x, y) === color) {
 					return;
 				} // don't send if color is the same
+				setPixelLocal(ctx, pixels, x, y, color); // optimistically set pixel locally
 				sendSetPixel(socket, x, y, color);
 			}
 		} else if (event.buttons === 2 || event.buttons === 4) {
@@ -200,6 +201,7 @@
 				if (getPixelColor(pixels, x, y) === color) {
 					return;
 				} // don't send if color is the same
+				setPixelLocal(ctx, pixels, x, y, color); // optimistically set pixel locally
 				sendSetPixel(socket, x, y, color);
 			}
 		} else if (isDragging && (event.buttons === 2 || event.buttons === 4)) {
